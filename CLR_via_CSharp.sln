@@ -1,0 +1,27 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.25420.1
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Port 3-Essential Types", "Port 3-Essential Types", "{6231E43C-B06E-4E37-A293-DF4DB4BC02FD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ch17-1-Delegates", "Ch17-1-Delegates\Ch17-1-Delegates.csproj", "{AD439C29-B3C4-4E64-98BA-A5B4D4EBCCFE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{AD439C29-B3C4-4E64-98BA-A5B4D4EBCCFE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AD439C29-B3C4-4E64-98BA-A5B4D4EBCCFE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AD439C29-B3C4-4E64-98BA-A5B4D4EBCCFE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AD439C29-B3C4-4E64-98BA-A5B4D4EBCCFE}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{AD439C29-B3C4-4E64-98BA-A5B4D4EBCCFE} = {6231E43C-B06E-4E37-A293-DF4DB4BC02FD}
+	EndGlobalSection
+EndGlobal
