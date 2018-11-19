@@ -17,6 +17,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ch20-1-ExceptionHandling", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ch21-1-GarbageCollection", "ch21-1-GarbageCollection\ch21-1-GarbageCollection.csproj", "{5A7AC43C-0E1A-4FC0-8296-6FB6DFF07963}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ch22-1-AppDomains", "Ch22-1-AppDomains\Ch22-1-AppDomains.csproj", "{77E3E79C-4A91-44E2-90D6-DEE934C4C6F8}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -43,6 +45,10 @@ Global
 		{5A7AC43C-0E1A-4FC0-8296-6FB6DFF07963}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5A7AC43C-0E1A-4FC0-8296-6FB6DFF07963}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5A7AC43C-0E1A-4FC0-8296-6FB6DFF07963}.Release|Any CPU.Build.0 = Release|Any CPU
+		{77E3E79C-4A91-44E2-90D6-DEE934C4C6F8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{77E3E79C-4A91-44E2-90D6-DEE934C4C6F8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{77E3E79C-4A91-44E2-90D6-DEE934C4C6F8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{77E3E79C-4A91-44E2-90D6-DEE934C4C6F8}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -53,5 +59,6 @@ Global
 		{7CC318A6-CB8A-4B76-9BBB-8C4E8088E1B7} = {6231E43C-B06E-4E37-A293-DF4DB4BC02FD}
 		{A0D02971-63DC-47F3-ADA5-E037091218C6} = {26E5887F-44D4-4541-AE6A-B52F0398A18E}
 		{5A7AC43C-0E1A-4FC0-8296-6FB6DFF07963} = {26E5887F-44D4-4541-AE6A-B52F0398A18E}
+		{77E3E79C-4A91-44E2-90D6-DEE934C4C6F8} = {26E5887F-44D4-4541-AE6A-B52F0398A18E}
 	EndGlobalSection
 EndGlobal

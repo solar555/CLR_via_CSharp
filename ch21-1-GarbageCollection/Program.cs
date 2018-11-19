@@ -18,7 +18,7 @@ namespace ch21_1_GarbageCollection
     {
         static void Main(string[] args)
         {
-            MemoryPressureAndHandleCollector.Go();
+            ConditionalWeakTableDemo.Go();
 
             Console.WriteLine("well done！");
             Console.ReadLine();
@@ -194,6 +194,72 @@ namespace ch21_1_GarbageCollection
                 s_hc.Remove();
                 Console.WriteLine("LimitedResource destroy. Count={0}", s_hc.Count);
             }
+        }
+    }
+
+    internal static class FixedStatement
+    {
+        unsafe public static void Go()
+        {
+            for (int x = 0; x < 10000; x++)
+            {
+                new Object();
+            }
+
+            IntPtr originalMemoryAddress;
+            Byte[] bytes = new byte[1000];
+
+            fixed (Byte* pbytes = bytes) { originalMemoryAddress = (IntPtr)pbytes; }
+
+            GC.Collect();
+
+            fixed(byte* pbytes = bytes)
+            {
+                Console.WriteLine("The Byte[] did{0} move during the GC",
+                    (originalMemoryAddress == (IntPtr)pbytes)? " not" : null);
+            }
+        }
+    }
+
+    internal static class ConditionalWeakTableDemo
+    {
+        public static void Go()
+        {
+            object o = new object().GCWatch("My Object created at " + DateTime.Now);
+            GC.Collect();   // Can not see GC notification now
+            GC.KeepAlive(o);// Ensure object referenced by o is alive
+            o = null;       // Object referenced by o could die
+
+            GC.Collect();   // Can see GC notification now
+            Console.ReadLine();
+        }
+    }
+
+    internal static class GCWatcher
+    {
+        private readonly static ConditionalWeakTable<object, NotifyWhenGCd<string>> s_cwt =
+            new ConditionalWeakTable<object, NotifyWhenGCd<string>>();
+
+        private sealed class NotifyWhenGCd<T>
+        {
+            private readonly T m_value;
+
+            internal NotifyWhenGCd(T value) { m_value = value; }
+
+            public override string ToString()
+            {
+                return m_value.ToString();
+            }
+            ~NotifyWhenGCd()
+            {
+                Console.WriteLine("GC'd: " + m_value);
+            }
+        }
+
+        public static T GCWatch<T>(this T @object, string tag) where T : class
+        {
+            s_cwt.Add(@object, new NotifyWhenGCd<string>(tag));
+            return @object;
         }
     }
 }
