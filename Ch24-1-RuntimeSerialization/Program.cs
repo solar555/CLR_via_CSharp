@@ -13,12 +13,11 @@ using System.Threading.Tasks;
 
 namespace Ch24_1_RuntimeSerialization
 {
-
     public static class RuntieSerialization
     {
         static void Main(string[] args)
         {
-            ISerializableVersioning.Go();
+            SerializingSingletons.Go();
 
             Console.ReadLine();
         }
@@ -306,6 +305,198 @@ namespace Ch24_1_RuntimeSerialization
             public override string ToString()
             {
                 return string.Format("Base Name={0}, Derived Name={1}", base.Name, m_name);
+            }
+        }
+    }
+
+    internal static class SerializingSingletons
+    {
+        public static void Go()
+        {
+            // Create an array with multiple elements refering to the one Singleton object
+            Singleton[] a1 = { Singleton.GetSingleton(), Singleton.GetSingleton() };
+            Console.WriteLine("Do both array elements refer to the same object? " + (a1[0] == a1[1]));
+
+            using (var stream = new MemoryStream())
+            {
+                BinaryFormatter formatter = new BinaryFormatter();
+
+                // Serialize and the deserialize the array elements
+                formatter.Serialize(stream, a1);
+                stream.Position = 0;
+                Singleton[] a2 = (Singleton[])formatter.Deserialize(stream);
+
+                Console.WriteLine("Do both array elements refer to the same object? " + (a2[0] == a2[1]));  // True
+                Console.WriteLine("Do all array elements refer to the same object? " + (a1[0] == a2[0]));   // True
+            }
+        }
+
+        // There should be only one instance of this type per AppDomain
+        [Serializable]
+        public sealed class Singleton : ISerializable
+        {
+            // This is the one instance of this type
+            private static readonly Singleton s_theOneObject = new Singleton();
+
+            // Here are the instance fields
+            public string Name = "Jeff";
+            public DateTime Date = DateTime.Now;
+
+            // Private constructor allowing this type to construct the singleton
+            private Singleton() { }
+
+            // Method returning a reference to the singleton
+            public static Singleton GetSingleton() { return s_theOneObject; }
+
+            // Method called when serializing a Singleton
+            // I recommand using an Explicit Interface Method Impl. here
+            [SecurityPermission(SecurityAction.Demand, SerializationFormatter = true)]
+            void ISerializable.GetObjectData(SerializationInfo info, StreamingContext context)
+            {
+                info.SetType(typeof(SingletonSerializationHelper));
+                // No other values need to be added
+            }
+
+            [Serializable]
+            private sealed class SingletonSerializationHelper : IObjectReference
+            {
+                // Method called after this object (which has no fields) is deserialized
+                public object GetRealObject(StreamingContext context)
+                {
+                    return GetSingleton();
+                }
+            }
+
+            // NOTE: The special constructor is NOT necessary because it's never called
+        }
+    }
+
+    internal static class SerializationSurrogates
+    {
+        public static void Go()
+        {
+            using (var stream = new MemoryStream())
+            {
+                // 1. Construct the desired formatter
+                IFormatter formatter = new SoapFormatter();
+
+                // 2. Construct a SurrogateSelector object
+                SurrogateSelector ss = new SurrogateSelector();
+
+                // 3. Tell the surrogate selector to use our surrogate for DateTime objects
+                ISerializationSurrogate utcToLocalTimeSurrogate = new UniversalToLocalTimeSerializationSurrogate();
+#if GetSurrogateForCyclicalReference
+                utcToLocalTimeSurrogate = FormatterServices.GetSurrogateForCyclicalReference(utcToLocalTimeSurrogate);
+#endif
+                ss.AddSurrogate(typeof(DateTime), formatter.Context, utcToLocalTimeSurrogate);
+
+                // NOTE: AddSurrogate can be called multiple times to register multiple surrogates
+
+                // 4. Tell the formatter to use our surrogate selector
+                formatter.SurrogateSelector = ss;
+
+                // Create a DateTime that represents the local time on the machine & serialize it
+                DateTime localTimeBeforeSerialize = DateTime.Now;
+                formatter.Serialize(stream, localTimeBeforeSerialize);
+
+                // The Soap-formatted stream displays the Universal time as a string to prove it worked
+                stream.Position = 0;
+                Console.WriteLine(new StreamReader(stream).ReadToEnd());
+
+                // Deserialize the Universal time string & convert it to a local DateTime for this machine
+                stream.Position = 0;
+                DateTime localTimeAfterDeserialize = (DateTime)formatter.Deserialize(stream);
+
+                // Prove it worked correctly
+                Console.WriteLine("LocalTimeBeforeSerialize={0}", localTimeBeforeSerialize);
+                Console.WriteLine("LocalTimeAfterDeserialize={0}", localTimeAfterDeserialize);
+            }
+        }
+
+        private sealed class UniversalToLocalTimeSerializationSurrogate : ISerializationSurrogate
+        {
+            public void GetObjectData(object obj, SerializationInfo info, StreamingContext context)
+            {
+                // Convert the DateTime from local to UTC
+                info.AddValue("Date", ((DateTime)obj).ToUniversalTime().ToString("u"));
+            }
+
+            public object SetObjectData(object obj, SerializationInfo info, StreamingContext context, ISurrogateSelector selector)
+            {
+                // Convert the DateTime from UTC to local
+                DateTime dt = DateTime.ParseExact(info.GetString("Date"), "u", null).ToLocalTime();
+#if GetSurrogateForCyclicalReference
+                 // When using GetSurrogateForCyclicalReference, you must modify 'obj' directly and return null or obj
+                 // So, I modify the boxed DateTime that is passed into SetObjectData
+                 FieldInfo fi = typeof(DateTime).GetField("dateData", BindingFlags.NonPublic | BindingFlags.Instance);
+                 fi.SetValue(obj, fi.GetValue(dt));
+                 return null;
+#else
+                return dt;
+#endif
+            }
+        }
+    }
+
+    internal static class SerializationBinderDemo
+    {
+        public static void Go()
+        {
+
+        }
+
+        [Serializable]
+        private sealed class Ver1
+        {
+            public int x = 1, y = 2, z = 3;
+        }
+
+        [Serializable]
+        private sealed class Ver2 : ISerializable
+        {
+            int a, b, c;
+
+            [SecurityPermission(SecurityAction.Demand, SerializationFormatter = true)]
+            public void GetObjectData(SerializationInfo info, StreamingContext context)
+            {
+                /* Never called: do nothing */
+            }
+
+            [SecurityPermission(SecurityAction.Demand, SerializationFormatter = true)]
+            private Ver2(SerializationInfo info, StreamingContext context)
+            {
+                a = info.GetInt32("x");
+                b = info.GetInt32("y");
+                c = info.GetInt32("z");
+            }
+
+            public override string ToString()
+            {
+                return string.Format("a={0}, b={1}, c={2}", a,b,c);
+            }
+        }
+
+        private sealed class Ver1ToVer2SerializationBinder : SerializationBinder
+        {
+            public override void BindToName(Type serializedType, out string assemblyName, out string typeName)
+            {
+                assemblyName = Assembly.GetExecutingAssembly().FullName;
+                typeName = typeof(Ver2).FullName;
+            }
+            public override Type BindToType(string assemblyName, string typeName)
+            {
+                // Deserialize any Ver1 object from version 1.0.0.0 of this assembly into a Ver2 object
+
+                // Calculate the assembly name that defined the Ver1 type
+                AssemblyName assemVer1 = Assembly.GetExecutingAssembly().GetName();
+                assemVer1.Version = new Version(1, 0, 0, 0);
+
+                // If deserializaing the Ver1 object from v1.0.0.0 of our assembly, turn it into a Ver2 object
+                if (assemblyName == assemVer1.ToString() && typeName == "SerializationBinderDemo+Ver1")
+                    return typeof(Ver2);
+
+                // Else, just return the same type being requested
+                return Type.GetType(string.Format("{0}, {1}", typeName, assemblyName));
             }
         }
     }
