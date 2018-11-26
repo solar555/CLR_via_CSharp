@@ -1,6 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.Remoting.Messaging;
 using System.Text;
 using System.Threading;
@@ -12,7 +15,7 @@ namespace Ch27_1_ComputeOps
     {
         static void Main(string[] args)
         {
-            TaskDemo.Go();
+            FalseSharing.Go();
 
             Console.WriteLine("Main is done.");
             Console.ReadLine();
@@ -265,7 +268,7 @@ namespace Ch27_1_ComputeOps
             {
                 t.Wait(); // For the testing only
             }
-            catch(AggregateException)
+            catch (AggregateException)
             {
 
             }
@@ -273,7 +276,8 @@ namespace Ch27_1_ComputeOps
 
         private static void ParentChild()
         {
-            Task<int[]> parent = new Task<int[]>(() => {
+            Task<int[]> parent = new Task<int[]>(() =>
+            {
                 var results = new int[3]; // Create an array for the results
 
                 // This tasks creates and starts 3 child tasks
@@ -299,7 +303,8 @@ namespace Ch27_1_ComputeOps
         /// </summary>
         private static void TaskFactory()
         {
-            Task parent = new Task(() => {
+            Task parent = new Task(() =>
+            {
                 var cts = new CancellationTokenSource();
                 var tf = new TaskFactory<int>(cts.Token, TaskCreationOptions.AttachedToParent, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
@@ -347,6 +352,273 @@ namespace Ch27_1_ComputeOps
             {
 
             }
+        }
+
+        private sealed class MyForm : System.Windows.Forms.Form
+        {
+            private readonly TaskScheduler m_syncContextTaskScheduler;
+            public MyForm()
+            {
+                // Get a reference to a synchronization context task scheduler
+                m_syncContextTaskScheduler = TaskScheduler.FromCurrentSynchronizationContext();
+
+                Text = "Synchronization Context Task Scheduler Demo";
+                Visible = true;
+                Width = 400;
+                Height = 100;
+            }
+
+            private CancellationTokenSource m_cts;
+
+            protected override void OnMouseClick(System.Windows.Forms.MouseEventArgs e)
+            {
+                if (m_cts != null)
+                {// An operation is in flight, cancel it
+                    m_cts.Cancel();
+                    m_cts = null;
+                }
+                else
+                {// An operation is not in flight, start it
+                    Text = "Operation running";
+                    m_cts = new CancellationTokenSource();
+
+                    // This task uses the default task scheduler and executes on a thread pool thread
+                    Task<int> t = Task.Run(() => Sum(m_cts.Token, 20000), m_cts.Token);
+
+                    // These tasks use the synchronization context task scheduler and execute on the GUI thread
+                    t.ContinueWith(task => Text = "Result: " + task.Result,
+                        CancellationToken.None, TaskContinuationOptions.OnlyOnRanToCompletion,
+                        m_syncContextTaskScheduler);
+
+                    t.ContinueWith(task => Text = "Operation canceled",
+                        CancellationToken.None, TaskContinuationOptions.OnlyOnCanceled,
+                        m_syncContextTaskScheduler);
+
+                    t.ContinueWith(task => Text = "Operation faulted",
+                        CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted,
+                        m_syncContextTaskScheduler);
+                }
+                base.OnMouseClick(e);
+            }
+        }
+    }
+
+    internal static class ParalleDemo
+    {
+        public static void Go()
+        {
+
+        }
+
+        private static void SimpleUsage()
+        {
+            // One thread performs all this work sequentially
+            for (int i = 0; i < 1000; i++) DoWork(i);
+
+            // The thread pool's threads process the work in parallel
+            Parallel.For(0, 1000, i => DoWork(i));
+
+            var collection = new int[0];
+            // One thread performs all this work sequentially
+            foreach (var item in collection) DoWork(item);
+
+            // The thread pool's threads process the work in parallel
+            Parallel.ForEach(collection, item => DoWork(item));
+
+            // One thread executes all the methods sequentially
+            Method1();
+            Method2();
+            Method3();
+
+            // The thread pool's threads execute the methods in parallel
+            Parallel.Invoke(
+                () => Method1(),
+                () => Method2(),
+                () => Method3());
+        }
+
+        private static Int64 DirectoryBytes(string path, string searchPattern, SearchOption searchOption)
+        {
+            var files = Directory.EnumerateFiles(path, searchPattern, searchOption);
+            Int64 masterTotal = 0;
+
+            ParallelLoopResult result = Parallel.ForEach<string, Int64>(files,
+                () =>
+                {
+                    // localInit: Invoked once per task at start
+                    // Initialize that this task has seen 0 bytes
+                    return 0; // Set's taskLocalTotal to 0
+                },
+                (file, parallelLoopState, index, taskLocalTotal) =>
+                {
+                    // body: Invoked once per work item
+                    // Get this file's size and add it to this task's running total
+                    Int64 fileLength = 0;
+                    FileStream fs = null;
+                    try
+                    {
+                        fs = File.OpenRead(file);
+                        fileLength = fs.Length;
+                    }
+                    catch (IOException)
+                    {
+                        /* Ignore any files we can't access */
+                    }
+                    finally { if (fs != null) fs.Dispose(); }
+                    return taskLocalTotal + fileLength;
+                },
+
+                taskLocalTotal =>
+                {
+                    // LocalFinally: Invoked once per task at end
+                    // Atomically add this task's total to the "master" total
+                    Interlocked.Add(ref masterTotal, taskLocalTotal);
+                });
+            return masterTotal;
+        }
+
+        private static void DoWork(int i) { }
+
+        private static void Method1() { }
+
+        private static void Method2() { }
+
+        private static void Method3() { }
+    }
+
+    internal static class ParallelLinq
+    {
+        public static void Go()
+        {
+            ObsoleteMethods(typeof(object).Assembly);
+        }
+
+        private static void ObsoleteMethods(Assembly assembly)
+        {
+            var query =
+                from type in assembly.GetExportedTypes().AsParallel()
+                from method in type.GetMethods(BindingFlags.Public |
+                BindingFlags.Instance | BindingFlags.Static)
+                let obsoleteAttrType = typeof(ObsoleteAttribute)
+                where Attribute.IsDefined(method, obsoleteAttrType)
+                orderby type.FullName
+                let obsoleteAttrObj = (ObsoleteAttribute)
+                    Attribute.GetCustomAttribute(method, obsoleteAttrType)
+                select string.Format("Type={0}\nMethod={1}\nMessage={2}\n",
+                    type.FullName, method.ToString(), obsoleteAttrObj.Message);
+
+            // Display the results
+            foreach (var result in query)
+                Console.WriteLine(result);
+            // Alternate (not as fast): query.ForAll(Console.WriteLine);
+        }
+    }
+
+    internal static class TimerDemo
+    {
+        private static Timer s_timer;
+
+        public static void Go()
+        {
+            Console.WriteLine("Checking status every 2 seconds");
+
+            // Create the Timer ensuring that it never fires. This ensures that
+            // s_timer refers to it BEFORE Status is invoked by a thread pool thread
+            s_timer = new Timer(Status, null, Timeout.Infinite, Timeout.Infinite);
+
+            // Now that s_timer is assigned to, we can let the timer fire knowing
+            // that calling Change in Status will not throw a NullReferenceException
+            s_timer.Change(0, Timeout.Infinite);
+
+            Console.WriteLine(); // Prevent the process from terminating
+        }
+
+        // This method's signature must match the TimerCallback delegate
+        private static void Status(object state)
+        {
+            // This method is executed by a thread pool thread
+            Console.WriteLine("In Status at {0}", DateTime.Now);
+            Thread.Sleep(1000); // Simulates other work (1 second)
+
+            // Just before returning, have the Timer fire again in 2 seconds
+            s_timer.Change(2000, Timeout.Infinite);
+
+            // When this method returns, the thread goes back
+            // to the pool and waits for another work item
+        }
+    }
+
+    internal static class DelayDemo
+    {
+        public static void Go()
+        {
+            Console.WriteLine("Checking status every 2 seconds");
+            Status();
+
+            Console.WriteLine("Go is done.");
+            Console.ReadLine(); // Prevent the process from terminating
+        }
+
+        // This method can take whatever parameters you desire
+        private static async void Status()
+        {
+            while (true)
+            {
+                Console.WriteLine("Checking status at {0}", DateTime.Now);
+                // Put code to check status here...
+                Console.WriteLine("before await");
+
+                // At end of loop, delay 2 seconds without blocking a thread
+                await Task.Delay(2000); // await allows thread to return
+                // After 2 seconds, some thread will continue after await to loop around
+                Console.WriteLine("after await");
+
+                break;
+            }
+        }
+    }
+
+    internal static class FalseSharing
+    {
+#if true
+        private class Data
+        {
+            // These two fields are right next to each other in
+            // memory; most-likely in the same cache line
+            public int field1;
+            public int field2;
+        }
+#else
+        [StructLayout(LayoutKind.Explicit)]
+        private class Data{
+            // These two fields are right next to each other in
+            // memory; most-likely in the same cache line
+            [FieldOffset(0)]
+            public Int32 field1;
+            [FieldOffset(64)]
+            public Int32 field2;
+        }
+#endif
+
+        private const Int32 iterations = 100;
+        private static int s_operations = 2;
+        private static Stopwatch s_stopwatch;
+
+        public static void Go()
+        {
+            Data data = new Data();
+            s_stopwatch = Stopwatch.StartNew();
+            ThreadPool.QueueUserWorkItem(o => AccessData(data, 0));
+            ThreadPool.QueueUserWorkItem(o => AccessData(data, 1));
+        }
+
+        private static void AccessData(Data data, int field)
+        {
+            for (int x = 0; x < iterations; x++)
+                if (field == 0) data.field1++; else data.field2++;
+
+            if (Interlocked.Decrement(ref s_operations) == 0)
+                Console.WriteLine("Access time: {0}", s_stopwatch.Elapsed);
         }
     }
 }
