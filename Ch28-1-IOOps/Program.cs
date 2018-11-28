@@ -1,6 +1,8 @@
-﻿using System;
+﻿using Microsoft.Win32.SafeHandles;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Linq;
@@ -681,5 +683,70 @@ namespace Ch28_1_IOOps
             }
             await task; // If failure, ensures 1st inner exception gets thrown instead of AggregateException
         }
+    }
+
+    internal static class ThreadIO
+    {
+        public static void Go()
+        {
+            using (ThreadIO.BeginBackgroundProcessing())
+            {
+                // Issue low-priority I/O request in here ...
+            }
+        }
+
+        public static BackgroundProcessingDisposer BeginBackgroundProcessing(bool process = false)
+        {
+            ChangeBackgroundProcessing(process, true);
+            return new BackgroundProcessingDisposer(process);
+        }
+
+        public static void EndBackgroundProcessing(bool process = false)
+        {
+            ChangeBackgroundProcessing(process, false);
+        }
+
+        private static void ChangeBackgroundProcessing(bool process, bool start)
+        {
+            bool ok = process
+                ? SetPriorityClass(GetCurrentWin32ProcessHandle(),
+                    start ? ProcessBackgroundMode.Start : ProcessBackgroundMode.End)
+                : SetThreadPriority(GetCurrentWin32ThreadHandle(),
+                    start ? ThreadBackgroundMode.Start : ThreadBackgroundMode.End);
+            if (!ok) throw new Win32Exception();
+        }
+
+        // This struct lets C#'s using statement end the background processing mode
+        public struct BackgroundProcessingDisposer : IDisposable
+        {
+            private readonly bool m_process;
+            public BackgroundProcessingDisposer(bool process) { m_process = process; }
+            public void Dispose() { EndBackgroundProcessing(m_process); }
+        }
+
+        // See Win32's THREAD_MODE_BACKGROUND_BEGIN and THREAD_MODE_BACKGROUND_END
+        private enum ThreadBackgroundMode { Start = 0x10000, End = 0x20000 }
+
+        // See Win32's PROCESS_MODE_BACKGROUND_BEGIN and PROCESS_MODE_BACKGROUND_END
+        private enum ProcessBackgroundMode { Start = 0x100000, End = 0x200000 }
+
+        [DllImport("Kernel32", EntryPoint = "GetCurrentProcess", ExactSpelling = true)]
+        private static extern SafeWaitHandle GetCurrentWin32ProcessHandle();
+
+        [DllImport("Kernel32", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetPriorityClass(SafeWaitHandle hprocess, ProcessBackgroundMode mode);
+
+        [DllImport("Kernel32", EntryPoint = "GetCurrentThread", ExactSpelling = true)]
+        private static extern SafeWaitHandle GetCurrentWin32ThreadHandle();
+
+        [DllImport("Kernel32", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetThreadPriority(SafeWaitHandle hthread, ThreadBackgroundMode mode);
+
+        // http://msdn.microsoft.com/en-us/library/aa480216.aspx
+        [DllImport("Kernel32", SetLastError = true, EntryPoint = "CancelSynchronousIo")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CancelSynchronousIO(SafeWaitHandle hThread);
     }
 }
