@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,7 +14,7 @@ namespace Ch29_1_PrimitiveThreadSync
     {
         public static void Main(string[] args)
         {
-            AsyncCoordinatorDemo.Go();
+            RegisteredWaitHandleDemo.Go();
             Console.ReadLine();
         }
 
@@ -22,6 +24,28 @@ namespace Ch29_1_PrimitiveThreadSync
             int value = 1 * 100 - 50 * 2;
 
             for (int x = 0; x < value; x++) Console.WriteLine("Jeff"); // A loop that does nothing
+        }
+
+        private static void SignleInstanceApp()
+        {
+            bool createdNew;
+
+            // 尝试创建一个具有指定名称的内核对象
+            using (new Semaphore(0,1,"SomeUniqueStringIdentifyingMyApp",out createdNew))
+            {
+                if (createdNew)
+                {
+                    // 这个线程创建了内核对象，所以肯定没有这个应用程序
+                    // 的其他实例正在运行，在这里运行应用程序的其余部分...
+                }
+                else
+                {
+                    // 这个线程打开了一个具有相同字符串名称的、现有的内核对象；
+                    // 表名肯定正在运行这个应用程序的另一个实例。
+                    // 这里没什么可以做的事情，所以从Main返回，终止应用程序
+                    // 的这个额外的实例。
+                }
+            }
         }
     }
 
@@ -306,6 +330,244 @@ namespace Ch29_1_PrimitiveThreadSync
                 if (Interlocked.Exchange(ref m_statusReported, 1) == 0)
                     m_callback(status);
             }
+        }
+    }
+
+    internal static class LockComparison
+    {
+        public static void Go()
+        {
+            int x = 0;
+            const int iterations = 10000000; // 10 million
+
+            // How long does it take to increment x 10 million times?
+            Stopwatch sw = Stopwatch.StartNew();
+            for (int i = 0; i < iterations; i++)
+            {
+                x++;
+            }
+            Console.WriteLine("Incrementing x: {0:N0}", sw.ElapsedMilliseconds);
+
+            // How long does it take to increment x 10 million times
+            // adding the overhead of calling a method that does nothing?
+            sw.Restart();
+            for (int i = 0; i < iterations; i++)
+            {
+                M(); x++; M();
+            }
+            Console.WriteLine("Incrementing x in M: {0:N0}", sw.ElapsedMilliseconds);
+
+            // How long does it take to increment x 10 million times
+            // adding the overhead of calling an uncontended SimpleSpinLock?
+            SimpleSpinLock ssl = new SimpleSpinLock();
+            sw.Restart();
+            for (int i = 0; i < iterations; i++)
+            {
+                ssl.Enter(); x++; ssl.Leave();
+            }
+            Console.WriteLine("Incrementing x in SimpleSpinLock: {0:N0}", sw.ElapsedMilliseconds);
+
+            // How long does it take to increment x 10 million times
+            // adding the overhead of calling an uncontended SpinLock?
+            SpinLock sl = new SpinLock(false);
+            sw.Restart();
+            for (int i = 0; i < iterations; i++)
+            {
+                bool taken = false;
+                sl.Enter(ref taken);
+                x++;
+                sl.Exit(false);
+            }
+            Console.WriteLine("Incrementing x in SpinLock: {0:N0}", sw.ElapsedMilliseconds);
+
+            // How long does it take to increment x 10 million times
+            // adding the overhead of calling an uncontended SimpleWaitLock?
+            using (SimpleWaitLock swl = new SimpleWaitLock())
+            {
+                sw.Restart();
+                for (int i = 0; i < iterations; i++)
+                {
+                    swl.Enter();
+                    x++;
+                    swl.Leave();
+                }
+                Console.WriteLine("Incrementing x in SimpleWaitLock: {0:N0}", sw.ElapsedMilliseconds);
+            }
+            Console.ReadLine();
+        }
+
+        public static int Maximum(ref int target, int value)
+        {
+            int currentVal = target, startVal, desiredVal;
+
+            // 不要在循环中访问目标（target），除非是想要改变它时另一个线程也在动它
+            do
+            {
+                // 记录这一次循环迭代的起始值（startVal）
+                startVal = currentVal;
+
+                // 基于startVal和value计算desiredVal
+                desiredVal = Math.Max(startVal, value);
+
+                // 注意：线程在这里可能被“抢占”，所以以下代码不是原子性的：
+                // if (target == startVal) target = desiredVal
+
+                // 而应该使用以下原子性的CompareExchange方法，它
+                // 返回在target在（可能）被方法修改之前的值
+                currentVal = Interlocked.CompareExchange(ref target, desiredVal, startVal);
+
+                // 如果target的值在这一次循环迭代中被其他线程改变，就重复
+            } while (startVal != currentVal);
+
+            // 在这个线程尝试设置它之前返回最大值
+            return desiredVal;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private static void M() { }
+
+        internal struct SimpleSpinLock
+        {
+            private int m_ResourceInUse; // 0=false (default), 1=true
+
+            public void Enter()
+            {
+                while (true)
+                {
+                    // Always set resource to in-use
+                    // When this thread changes it from not in-use, return
+                    if (Interlocked.Exchange(ref m_ResourceInUse, 1) == 0) return;
+                    // Black magic goes here...
+                }
+            }
+
+            public void Leave()
+            {
+                // Set resource to not in-use
+                Volatile.Write(ref m_ResourceInUse, 0);
+            }
+        }
+
+        private sealed class SimpleWaitLock : IDisposable
+        {
+            private readonly AutoResetEvent m_available;
+            public SimpleWaitLock()
+            {
+                m_available = new AutoResetEvent(true); // Initially free
+            }
+
+            public void Enter()
+            {
+                // Block in kernel until resource available
+                m_available.WaitOne();
+            }
+
+            public void Leave()
+            {
+                // Let another thread access the resource
+                m_available.Set();
+            }
+
+            public void Dispose() { m_available.Dispose(); }
+
+            delegate int Morpher<TResult, TArgument>(int startValue, TArgument argument,
+                out TResult morphResult);
+
+            static TResult Morph<TResult, TArgument>(ref int target, TArgument argument,
+                Morpher<TResult, TArgument> morpher)
+            {
+                TResult morphResult;
+                int currentVal = target;
+                int startVal;
+                int desiredVal;
+                do
+                {
+                    startVal = currentVal;
+                    desiredVal = morpher(startVal, argument, out morphResult);
+                    currentVal = Interlocked.CompareExchange(ref target, desiredVal, startVal);
+                } while (startVal != currentVal);
+                return morphResult;
+            }
+        }
+    }
+
+    internal sealed class RecursiveAutoResetEvent : IDisposable
+    {
+        private AutoResetEvent m_lock = new AutoResetEvent(true);
+        private int m_owningThreadId = 0;
+        private int m_recursionCount = 0;
+
+        public void Enter()
+        {
+            // Obtain the calling thread's unique Int32 ID
+            int currentThreadId = Thread.CurrentThread.ManagedThreadId;
+
+            // If the calling thread owns the lock, increment the recursion count
+            if (m_owningThreadId == currentThreadId)
+            {
+                m_recursionCount++;
+                return;
+            }
+
+            // The calling thread doesn't own the lock, wait for it 
+            m_lock.WaitOne();
+
+            // The calling now owns the lock, initialize the owning thread ID & recursion count
+            m_owningThreadId = currentThreadId;
+            m_recursionCount--;
+        }
+
+        public void Leave()
+        {
+            // If the calling thread doesn't own the lock, we have an error
+            if (m_owningThreadId != Thread.CurrentThread.ManagedThreadId)
+                throw new InvalidOperationException();
+
+            // Subtract 1 from the recursion count
+            if (--m_recursionCount == 0)
+            {
+                // If the recursion count is 0, then no thread owns the lock
+                m_owningThreadId = 0;
+                m_lock.Set(); // Wake up 1 waiting thread (if any)
+            }
+        }
+
+        public void Dispose() { m_lock.Dispose(); }
+    }
+
+    internal static class RegisteredWaitHandleDemo
+    {
+        public static void Go()
+        {
+            // Construct an AutoResetEvent (initially false)
+            AutoResetEvent are = new AutoResetEvent(false);
+
+            // Tell the thread pool to wait on the AutoResetEvent
+            RegisteredWaitHandle rwh = ThreadPool.RegisterWaitForSingleObject(
+                are,            // Wait on this AutoResetEvent
+                EventOperation, // When available, call the EventOperation method
+                null,           // Pass null to EventOperation
+                5000,           // Wait 5 seconds for the event to become true
+                false);         // Call EventOperation everytime the event is true
+
+            // Start our loop
+            char operation = (char)0;
+            while(operation != 'Q')
+            {
+                Console.WriteLine("S=Signal, Q=Quit?");
+                operation = char.ToUpper(Console.ReadKey(true).KeyChar);
+                if (operation == 'S') are.Set(); // User want to set the event
+            }
+
+            // Tell the thread pool to stop waiting on the event
+            rwh.Unregister(null);
+        }
+
+        // This method is called whenever the event is true or
+        // when 5 seconds have elapsed since the last callback/timeout
+        private static void EventOperation(object state, bool timedOut)
+        {
+            Console.WriteLine(timedOut ? "Timeout" : "Event became true");
         }
     }
 }
